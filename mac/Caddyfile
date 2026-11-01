@@ -1,0 +1,24 @@
+# HTTPS front for a local model gateway on the Mac.
+# Replace /PATH/TO/certs, local-gw and 3425 with your values.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+https://local-gw:3443 {
+	bind 127.0.0.1
+	tls /PATH/TO/certs/server.pem /PATH/TO/certs/server.key
+	reverse_proxy 127.0.0.1:3425 {
+		# Some local gateways (magpie, for example) reject browser-like
+		# requests whose Host is not localhost. Claude Desktop's requests
+		# look browser-like, so present them as plain loopback requests.
+		header_up Host 127.0.0.1:3425
+		header_up -X-Forwarded-Host
+		header_up -X-Forwarded-Proto
+		header_up -X-Forwarded-For
+		header_up -Origin
+		# Pass streamed tokens through immediately.
+		flush_interval -1
+	}
+}

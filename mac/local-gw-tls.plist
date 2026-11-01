@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copy to ~/Library/LaunchAgents/local-gw-tls.plist, replace /PATH/TO,
+     then: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local-gw-tls.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>local-gw-tls</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/caddy</string>
+		<string>run</string>
+		<string>--config</string>
+		<string>/PATH/TO/Caddyfile</string>
+		<string>--adapter</string>
+		<string>caddyfile</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>XDG_DATA_HOME</key>
+		<string>/PATH/TO/caddy-data</string>
+		<key>XDG_CONFIG_HOME</key>
+		<string>/PATH/TO/caddy-data</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/PATH/TO/caddy.log</string>
+</dict>
+</plist>

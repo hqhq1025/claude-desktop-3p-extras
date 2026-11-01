@@ -1,0 +1,14 @@
+# systemd unit for the remote host. Copy to /etc/systemd/system/, replace
+# /opt/local-gw and the ports, then: systemctl enable --now local-gw-tls
+# Without systemd (containers), run the same command under supervisord;
+# see supervisord.conf in this directory.
+[Unit]
+Description=TLS front for the local model gateway (local-gw:3443)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -I /opt/local-gw/tls_forward.py 3443 3425 /opt/local-gw/server.pem /opt/local-gw/server.key
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
