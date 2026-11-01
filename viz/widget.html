@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  /* --viz-* follow the host's own color variables when it sends them (hostContext.styles). */
+  :root {
+    color-scheme: light dark;
+    --viz-fg: var(--color-text-primary, #1f2328);
+    --viz-muted: var(--color-text-secondary, #57606a);
+    --viz-border: var(--color-border-primary, #d0d7de);
+    --viz-surface: var(--color-background-secondary, #f6f8fa);
+    --viz-bg: var(--color-background-primary, #ffffff);
+    --viz-accent: #d97757;
+    --viz-danger: #d1242f;
+    --viz-font: var(--font-sans, -apple-system, "PingFang SC", sans-serif);
+    --viz-mono: var(--font-mono, ui-monospace, Menlo, monospace);
+    font-family: var(--viz-font);
+  }
+  :root[data-theme="dark"] {
+    --viz-fg: var(--color-text-primary, #e6edf3);
+    --viz-muted: var(--color-text-secondary, #9da7b3);
+    --viz-border: var(--color-border-primary, #3d444d);
+    --viz-surface: var(--color-background-secondary, #1c2128);
+    --viz-bg: var(--color-background-primary, #0d1117);
+    --viz-danger: #ff7b72;
+  }
+  html, body { margin: 0; padding: 0; background: transparent; color: var(--viz-fg); }
+  body { position: relative; }
+  #status { color: var(--viz-muted); font-size: 13px; padding: 8px 2px; }
+  #root svg { max-width: 100%; height: auto; }
+  .viz-error { color: var(--viz-danger); white-space: pre-wrap; font: 12px var(--viz-mono); padding: 6px 2px; }
+  #viz-toolbar { position: absolute; top: 2px; right: 2px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; z-index: 10; }
+  body:hover #viz-toolbar, #viz-toolbar:focus-within { opacity: 1; }
+  #viz-toolbar button { font: 12px var(--viz-font); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--viz-border); background: var(--viz-bg); color: var(--viz-muted); cursor: pointer; }
+  #viz-toolbar button:hover { color: var(--viz-fg); }
+  #viz-zoombar { display: inline-flex; gap: 2px; }
+  #viz-zoombar[hidden] { display: none; }
+  /* Zoom mode: the content keeps its natural width and is magnified inside a
+     fixed-height viewport that scrolls and can be dragged. */
+  #viz-viewport.zoomed { height: 620px; overflow: auto; cursor: grab; border: 1px dashed var(--viz-border); border-radius: 6px; }
+  #viz-viewport.zoomed.dragging { cursor: grabbing; user-select: none; }
+  body.viz-standalone { margin: 24px; }
+  body.viz-standalone #viz-viewport.zoomed { height: calc(100vh - 80px); }
+  /* component kit */
+  .viz-table-wrap { overflow: auto; max-height: var(--viz-table-max-height, 420px); border: 1px solid var(--viz-border); border-radius: 8px; }
+  .viz-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .viz-table th, .viz-table td { padding: 6px 10px; border-bottom: 1px solid var(--viz-border); text-align: left; white-space: nowrap; }
+  .viz-table th { position: sticky; top: 0; background: var(--viz-surface); cursor: pointer; user-select: none; font-weight: 600; }
+  .viz-table td.num, .viz-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .viz-table tr:hover td { background: var(--viz-surface); }
+  .viz-filter { margin: 0 0 6px; width: 220px; }
+  .viz-input, .viz-filter { font: 13px var(--viz-font); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--viz-border); background: var(--viz-bg); color: var(--viz-fg); }
+  .viz-form { display: grid; gap: 12px; font-size: 13px; }
+  .viz-form label.q { display: block; font-weight: 600; margin-bottom: 6px; }
+  .viz-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .viz-pill { font: 13px var(--viz-font); padding: 4px 12px; border-radius: 999px; border: 1px solid var(--viz-border); background: transparent; color: var(--viz-fg); cursor: pointer; }
+  .viz-pill[aria-pressed="true"] { border-color: var(--viz-accent); background: var(--viz-accent); color: #fff; }
+  .viz-btn { font: 13px var(--viz-font); padding: 6px 14px; border-radius: 6px; border: 1px solid var(--viz-accent); background: var(--viz-accent); color: #fff; cursor: pointer; justify-self: start; }
+  .viz-btn:disabled { opacity: .5; cursor: default; }
+  #viz-notice { margin-top: 8px; font-size: 12px; color: var(--viz-muted); padding: 4px 8px; border-radius: 6px; border: 1px dashed var(--viz-border); }
+  #viz-notice a { color: var(--viz-accent); cursor: pointer; margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="viz-toolbar" hidden>
+  <span id="viz-zoombar" hidden>
+    <button type="button" data-act="zoom-out" title="缩小">−</button>
+    <button type="button" data-act="zoom-reset" id="viz-zoomlabel" title="还原">100%</button>
+    <button type="button" data-act="zoom-in" title="放大">+</button>
+  </span>
+  <button type="button" data-act="zoom">放大</button>
+  <button type="button" data-act="open">侧边打开</button>
+  <button type="button" data-act="fullscreen">全屏</button>
+  <button type="button" data-act="download">保存</button>
+</div>
+<div id="status">正在生成可视化…</div>
+<div id="viz-viewport"><div id="root"></div></div>
+<div id="viz-notice" role="status" hidden></div>
+<script>
+(() => {
+  // Standalone: the viz server serves this same page for the side browser pane
+  // ("侧边打开") with the widget arguments injected; there is no host to talk to.
+  const standalone = window.__VIZ_STANDALONE__ || null;
+  const host = standalone ? null : window.parent;
+  const pending = new Map();
+  let nextId = 1;
+  let finalCode = null;
+  let title = "visual";
+  let hostInfo = {};
+  let displayMode = "inline";
+
+  const post = (msg) => { if (host) host.postMessage(msg, "*"); };
+  const notify = (method, params) => post({ jsonrpc: "2.0", method, params: params || {} });
+  const request = (method, params) => new Promise((resolve, reject) => {
+    if (!host) return reject(new Error("standalone page has no host"));
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    post({ jsonrpc: "2.0", id, method, params });
+  });
+  const $ = (id) => document.getElementById(id);
+  const PAGE_VERSION = "0.6.1";
+
+  // Diagnostics go to the viz server's log (~/Library/Logs/viz-widget/server.log)
+  // through the host's tools/call proxy, so problems are visible without screenshots.
+  // One id per mount: the host mounts the same widget again when the chat is reopened.
+  const INSTANCE = Math.random().toString(36).slice(2, 8);
+  function report(event, detail) {
+    const call = request("tools/call", { name: "widget_report", arguments: { event, detail: { page: PAGE_VERSION, inst: INSTANCE, title, ...detail } } });
+    Promise.race([call, new Promise((r) => setTimeout(r, 5000))]).catch(() => {});
+  }
+  // Calls a viz server tool from the page; resolves to the tool result or throws its error text.
+  async function serverTool(name, args) {
+    const r = await request("tools/call", { name, arguments: args });
+    if (!r || r.isError) throw new Error(((r && r.content) || []).map((c) => c.text).join(" ") || `${name} failed`);
+    return r;
+  }
+
+  // ---------- theme ----------
+  function applyHostContext(ctx) {
+    if (!ctx) return;
+    if (ctx.theme === "dark" || ctx.theme === "light") document.documentElement.dataset.theme = ctx.theme;
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars) for (const [k, v] of Object.entries(vars)) if (k.startsWith("--") && v) document.documentElement.style.setProperty(k, v);
+    if (ctx.displayMode) displayMode = ctx.displayMode;
+  }
+
+  // ---------- what the model sees ----------
+  // The host keeps only the latest ui/update-model-context of a widget, so the
+  // state set by viz.setContext and the error list always go out together.
+  const errors = [];
+  let contextState;
+  function pushContext() {
+    const parts = [];
+    if (contextState !== undefined) parts.push(`Widget "${title}" state: ${typeof contextState === "string" ? contextState : JSON.stringify(contextState)}`);
+    if (errors.length) parts.push(`Widget "${title}" errors:\n${errors.slice(-10).join("\n")}`);
+    const params = { content: [{ type: "text", text: parts.join("\n\n") }] };
+    if (contextState !== null && typeof contextState === "object") params.structuredContent = contextState;
+    return request("ui/update-model-context", params).catch(() => {});
+  }
+
+  // ---------- errors ----------
+  function showError(text) {
+    errors.push(text);
+    const el = document.createElement("div");
+    el.className = "viz-error";
+    el.textContent = text;
+    $("root").appendChild(el);
+    report("error", { text });
+    pushContext();
+  }
+  window.addEventListener("error", (e) => showError(`脚本错误：${e.message}${e.lineno ? ` (行 ${e.lineno})` : ""}`));
+  window.addEventListener("unhandledrejection", (e) => showError(`未处理的异常：${e.reason && e.reason.message || e.reason}`));
+
+  // ---------- helpers exposed to widget code ----------
+  const toBase64 = (blob) => new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.readAsDataURL(blob);
+  });
+  const safeName = (s) => String(s || "visual").replace(/[\\/:*?"<>|\s]+/g, "-").slice(0, 80);
+
+  // Saves a file. Hosts with ui/download-file show a save dialog; this Desktop
+  // build has none, so the viz server writes it to ~/Downloads instead.
+  // Resolves to {ok, path?}; never throws, the outcome is shown in the notice line.
+  async function download(name, data, mime) {
+    const blob = data instanceof Blob ? data : new Blob([data], { type: mime || "text/plain;charset=utf-8" });
+    if (standalone) {  // a normal browser tab saves through its own download
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      return { ok: true };
+    }
+    const b64 = await toBase64(blob);
+    try {
+      if (hostInfo.hostCapabilities && hostInfo.hostCapabilities.downloadFile) {
+        const r = await request("ui/download-file", {
+          contents: [{ type: "resource", resource: { uri: `file:///${safeName(name)}`, mimeType: blob.type || mime || "application/octet-stream", blob: b64 } }],
+        });
+        if (r && r.isError) throw new Error("宿主没有保存");
+        report("download", { name, bytes: blob.size, via: "host" });
+        notice(`已交给宿主保存：${name}`, { hideAfter: 4000 });
+        return { ok: true };
+      }
+      const r = await serverTool("widget_save", { name, base64: b64 });
+      const path = r.structuredContent && r.structuredContent.path;
+      report("download", { name, bytes: blob.size, via: "server", path });
+      notice(`已保存到 ${path}`);
+      return { ok: true, path };
+    } catch (err) {
+      const msg = (err && (err.message || err)) || "未知错误";
+      report("download", { name, error: msg });
+      notice(`保存失败：${msg}`);
+      return { ok: false };
+    }
+  }
+
+  function svgToPng(svgEl, scale = 2) {
+    return new Promise((resolve, reject) => {
+      const clone = svgEl.cloneNode(true);
+      const box = svgEl.getBoundingClientRect();
+      clone.setAttribute("width", box.width); clone.setAttribute("height", box.height);
+      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      // Resolve CSS variables so the exported file keeps its colors outside this page.
+      const cs = getComputedStyle(document.documentElement);
+      let text = new XMLSerializer().serializeToString(clone).replace(/var\((--[\w-]+)(?:,[^)]*)?\)/g, (m, v) => cs.getPropertyValue(v).trim() || m);
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = Math.ceil(box.width * scale); c.height = Math.ceil(box.height * scale);
+        const g = c.getContext("2d");
+        g.fillStyle = cs.getPropertyValue("--viz-bg").trim() || "#fff"; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
+      };
+      img.onerror = () => reject(new Error("SVG could not be rasterized"));
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(text);
+    });
+  }
+
+  // Desktop snapshots the side-pane page for the chat's browser card as it loads;
+  // an animating chart would be caught half drawn, so the pane copy draws at once.
+  function stillCharts() {
+    if (standalone && window.Chart && window.Chart.defaults) window.Chart.defaults.animation = false;
+  }
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[data-viz-src="${src}"]`)) return resolve();
+      const s = document.createElement("script");
+      s.src = src; s.dataset.vizSrc = src;
+      s.onload = () => { stillCharts(); resolve(); };
+      s.onerror = () => reject(new Error(`脚本加载失败：${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ---------- sending chat messages ----------
+  // The host refuses ui/message ({isError:true}) while Claude is still replying,
+  // sends it directly when idle, or only fills the composer in some states.
+  // Report each outcome, and retry a refused message until the reply ends.
+  let noticeTimer = null, pendingSend = null;
+  function notice(text, opts = {}) {
+    const el = $("viz-notice");
+    clearTimeout(noticeTimer);
+    el.textContent = text;
+    if (opts.cancel) {
+      const a = document.createElement("a"); a.textContent = "取消"; a.onclick = opts.cancel; el.appendChild(a);
+    }
+    el.hidden = false;
+    if (opts.hideAfter) noticeTimer = setTimeout(() => (el.hidden = true), opts.hideAfter);
+  }
+  const RETRY_MS = 2000, RETRY_FOR_MS = 180000;
+  function sendPrompt(text) {
+    text = String(text);
+    if (standalone) {
+      notice(`这是独立页面，不能直接发给 Claude。需要追问时回到对话里输入：${text.length > 60 ? text.slice(0, 60) + "…" : text}`);
+      return Promise.resolve(false);
+    }
+    if (pendingSend) pendingSend.cancelled = true;
+    const job = pendingSend = { cancelled: false, start: Date.now() };
+    const attempt = async () => {
+      if (job.cancelled) return false;
+      const r = await request("ui/message", { role: "user", content: [{ type: "text", text }] })
+        .catch(() => ({ isError: true }));
+      if (job.cancelled) return false;
+      if (!r || r.isError !== true) {
+        pendingSend = null;
+        report("message", { outcome: r && r._sentToChat ? "sent" : "accepted", tries: job.tries || 1 });
+        // Without _sentToChat this host only put the text into the message box.
+        notice(r && r._sentToChat ? "已发送" : "已填入下方输入框，按回车发送", { hideAfter: 6000 });
+        return true;
+      }
+      job.tries = (job.tries || 1) + 1;
+      if (job.tries === 2) report("message", { outcome: "refused-retrying" });
+      if (Date.now() - job.start > RETRY_FOR_MS) {
+        pendingSend = null;
+        report("message", { outcome: "gave-up", tries: job.tries });
+        notice(`未发送：${text.length > 60 ? text.slice(0, 60) + "…" : text}`);
+        return false;
+      }
+      notice("Claude 还在回复，回复结束后自动发送", { cancel: () => { job.cancelled = true; pendingSend = null; notice("已取消", { hideAfter: 2000 }); } });
+      await new Promise((r2) => setTimeout(r2, RETRY_MS));
+      return attempt();
+    };
+    return attempt();
+  }
+
+  const isNum = (v) => typeof v === "number" || (typeof v === "string" && v.trim() !== "" && !isNaN(+v));
+
+  // Sortable, filterable table. rows: array of objects or arrays; opts.columns: [{key,label,format}]
+  function table(target, rows, opts = {}) {
+    const el = typeof target === "string" ? document.querySelector(target) : target;
+    const cols = opts.columns || (rows.length ? Object.keys(Array.isArray(rows[0]) ? rows[0].map((_, i) => i) : rows[0]).map((k) => ({ key: k, label: String(k) })) : []);
+    let sortKey = null, asc = true, query = "";
+    const wrap = document.createElement("div");
+    if (opts.filter !== false) {
+      const f = document.createElement("input");
+      f.className = "viz-filter"; f.placeholder = opts.filterPlaceholder || "筛选…";
+      f.oninput = () => { query = f.value.toLowerCase(); draw(); };
+      wrap.appendChild(f);
+    }
+    const box = document.createElement("div"); box.className = "viz-table-wrap";
+    if (opts.maxHeight) box.style.setProperty("--viz-table-max-height", opts.maxHeight + "px");
+    wrap.appendChild(box); el.appendChild(wrap);
+    const numeric = Object.fromEntries(cols.map((c) => [c.key, rows.every((r) => r[c.key] == null || isNum(r[c.key]))]));
+    function draw() {
+      let data = rows.filter((r) => !query || cols.some((c) => String(r[c.key] ?? "").toLowerCase().includes(query)));
+      if (sortKey !== null) data = data.slice().sort((a, b) => {
+        const x = a[sortKey], y = b[sortKey];
+        const d = numeric[sortKey] ? (+x) - (+y) : String(x ?? "").localeCompare(String(y ?? ""), "zh");
+        return asc ? d : -d;
+      });
+      const head = cols.map((c) => `<th class="${numeric[c.key] ? "num" : ""}" data-k="${c.key}">${c.label}${sortKey === c.key ? (asc ? " ▲" : " ▼") : ""}</th>`).join("");
+      const body = data.slice(0, opts.maxRows || 2000).map((r) => "<tr>" + cols.map((c) => {
+        const v = r[c.key];
+        const shown = c.format ? c.format(v, r) : (v ?? "");
+        return `<td class="${numeric[c.key] ? "num" : ""}">${shown}</td>`;
+      }).join("") + "</tr>").join("");
+      box.innerHTML = `<table class="viz-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      box.querySelectorAll("th").forEach((th) => th.onclick = () => {
+        const k = th.dataset.k; const key = cols.find((c) => String(c.key) === k).key;
+        asc = sortKey === key ? !asc : true; sortKey = key; draw();
+      });
+      if (opts.onChange) opts.onChange(data);
+    }
+    draw();
+    return { redraw: draw };
+  }
+
+  // Question form; on submit the answers are sent as the user's next chat message.
+  // fields: [{id, label, type: "choice"|"multi"|"text"|"textarea"|"number"|"date"|"range", options, min, max, step, default, placeholder}]
+  function form(target, fields, opts = {}) {
+    const el = typeof target === "string" ? document.querySelector(target) : target;
+    const f = document.createElement("form"); f.className = "viz-form";
+    const state = {};
+    for (const q of fields) {
+      const row = document.createElement("div");
+      row.innerHTML = `<label class="q">${q.label}</label>`;
+      if (q.type === "choice" || q.type === "multi") {
+        const pills = document.createElement("div"); pills.className = "viz-pills";
+        state[q.id] = q.type === "multi" ? new Set([].concat(q.default || [])) : (q.default ?? null);
+        for (const opt of q.options || []) {
+          const b = document.createElement("button"); b.type = "button"; b.className = "viz-pill"; b.textContent = opt;
+          const on = () => (q.type === "multi" ? state[q.id].has(opt) : state[q.id] === opt);
+          b.setAttribute("aria-pressed", on());
+          b.onclick = () => {
+            if (q.type === "multi") state[q.id].has(opt) ? state[q.id].delete(opt) : state[q.id].add(opt);
+            else state[q.id] = state[q.id] === opt ? null : opt;
+            pills.querySelectorAll(".viz-pill").forEach((p) => p.setAttribute("aria-pressed", q.type === "multi" ? state[q.id].has(p.textContent) : state[q.id] === p.textContent));
+          };
+          pills.appendChild(b);
+        }
+        row.appendChild(pills);
+      } else {
+        const input = document.createElement(q.type === "textarea" ? "textarea" : "input");
+        input.className = "viz-input";
+        if (q.type !== "textarea") input.type = q.type || "text";
+        for (const a of ["min", "max", "step", "placeholder"]) if (q[a] != null) input.setAttribute(a, q[a]);
+        if (q.default != null) input.value = q.default;
+        if (q.type === "textarea") { input.rows = 3; input.style.width = "100%"; input.style.boxSizing = "border-box"; }
+        state[q.id] = input;
+        row.appendChild(input);
+        if (q.type === "range") {
+          const out = document.createElement("span"); out.style.marginLeft = "8px"; out.textContent = input.value;
+          input.oninput = () => (out.textContent = input.value); row.appendChild(out);
+        }
+      }
+      f.appendChild(row);
+    }
+    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "viz-btn";
+    submit.textContent = opts.submitLabel || "提交";
+    f.appendChild(submit);
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      const answers = {};
+      for (const q of fields) {
+        const s = state[q.id];
+        answers[q.label] = s instanceof Set ? [...s].join("、") : (s && s.value !== undefined ? s.value : s) || "（未填）";
+      }
+      const text = (opts.intro ? opts.intro + "\n" : "") + Object.entries(answers).map(([k, v]) => `- ${k}：${v}`).join("\n");
+      submit.disabled = true; submit.textContent = "发送中…";
+      viz.sendPrompt(text).then((ok) => {
+        submit.textContent = ok ? (opts.sentLabel || "已发送") : (opts.submitLabel || "提交");
+        submit.disabled = ok;
+      });
+      if (opts.onSubmit) opts.onSubmit(answers);
+    };
+    el.appendChild(f);
+    return f;
+  }
+
+  // Data from args.data arrives with the code; data from data_file arrives later with the tool result.
+  let resolveData;
+  const dataReady = new Promise((r) => (resolveData = r));
+
+  const viz = window.viz = {
+    data: undefined,
+    whenData: () => dataReady,
+    get host() { return hostInfo; },
+    get theme() { return document.documentElement.dataset.theme || "light"; },
+    palette: ["#d97757", "#3b7dd8", "#3fb76f", "#d4a72c", "#a371f7", "#e5534b", "#39c5cf", "#8b949e"],
+    sendPrompt,
+    setContext: (value) => { contextState = value; return pushContext(); },
+    openLink: (url) => request("ui/open-link", { url: String(url) }).catch(() => {}),
+    download,
+    loadScript,
+    table,
+    form,
+    // This Desktop build offers only "inline"; then fullscreen() resolves {mode:"inline", unsupported:true}.
+    fullscreen: () => {
+      const modes = (hostInfo.hostContext && hostInfo.hostContext.availableDisplayModes) || [];
+      if (!modes.includes("fullscreen")) return Promise.resolve({ mode: displayMode, unsupported: true });
+      return request("ui/request-display-mode", { mode: displayMode === "fullscreen" ? "inline" : "fullscreen" })
+        .then((r) => { report("display-mode", { result: r }); if (r && r.mode) displayMode = r.mode; return r; },
+              (err) => { report("display-mode", { error: err && (err.message || err) }); return { mode: displayMode, error: true }; });
+    },
+    onData: null,
+  };
+  window.sendPrompt = viz.sendPrompt;
+  window.openLink = viz.openLink;
+
+  // Links: the sandbox cannot navigate, so hand them to the host.
+  document.addEventListener("click", (e) => {
+    const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    if (!a) return;
+    const href = a.getAttribute("href");
+    if (a.hasAttribute("download") && href.startsWith("data:")) {
+      e.preventDefault();
+      fetch(href).then((r) => r.blob()).then((b) => download(a.getAttribute("download") || "download", b));
+    } else if (/^https?:/.test(href)) {
+      e.preventDefault();
+      viz.openLink(href);
+    }
+  });
+
+  // ---------- zoom ----------
+  // CSS zoom on #root, with #root pinned to its natural width so the content is
+  // magnified instead of reflowed; the viewport scrolls and can be dragged.
+  const ZOOMS = [1, 1.5, 2, 3, 4];
+  let zoomIndex = 0;
+  function setZoom(index) {
+    zoomIndex = Math.max(0, Math.min(ZOOMS.length - 1, index));
+    const z = ZOOMS[zoomIndex], root = $("root"), vp = $("viz-viewport");
+    if (z === 1) {
+      root.style.zoom = ""; root.style.width = "";
+      vp.classList.remove("zoomed");
+      $("viz-zoombar").hidden = true;
+      document.querySelector('[data-act="zoom"]').hidden = false;
+    } else {
+      if (!vp.classList.contains("zoomed")) {
+        // Fall back to the viewport width if layout has not run yet (width 0).
+        const w = root.getBoundingClientRect().width || vp.clientWidth || document.body.clientWidth;
+        if (w) root.style.width = `${w}px`;
+        vp.classList.add("zoomed");
+        report("zoom", { level: z, width: w });
+      }
+      root.style.zoom = String(z);
+      $("viz-zoombar").hidden = false;
+      document.querySelector('[data-act="zoom"]').hidden = true;
+    }
+    $("viz-zoomlabel").textContent = `${Math.round(z * 100)}%`;
+  }
+  (() => {
+    const vp = $("viz-viewport");
+    let drag = null;
+    vp.addEventListener("mousedown", (e) => {
+      if (!vp.classList.contains("zoomed") || e.button !== 0) return;
+      if (e.target.closest("button, a, input, select, textarea, label")) return;
+      drag = { x: e.clientX, y: e.clientY, left: vp.scrollLeft, top: vp.scrollTop };
+      vp.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!drag) return;
+      vp.scrollLeft = drag.left - (e.clientX - drag.x);
+      vp.scrollTop = drag.top - (e.clientY - drag.y);
+    });
+    window.addEventListener("mouseup", () => { drag = null; vp.classList.remove("dragging"); });
+    // Ctrl/Cmd + wheel (or pinch) zooms while in zoom mode.
+    vp.addEventListener("wheel", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || !vp.classList.contains("zoomed")) return;
+      e.preventDefault();
+      setZoom(zoomIndex + (e.deltaY < 0 ? 1 : -1));
+    }, { passive: false });
+  })();
+
+  // ---------- open in the side browser pane ----------
+  // Only Claude can drive Desktop's browser pane (preview_start), and the host
+  // refuses ui/open-link for http://127.0.0.1 (Desktop 4.4212.0). So the viz
+  // server serves a copy of this widget and the request goes through the chat.
+  // The host appends every accepted ui/message to the input box, so repeated
+  // clicks would stack copies of the request: reuse one URL, ignore clicks while
+  // a request waits for the reply to end, and only remind for a short while after.
+  const PANE_REMIND_MS = 15000;
+  let paneUrl = null, paneBusy = false, paneFilledAt = 0;
+  async function openInPane() {
+    if (standalone || !finalCode) return;
+    if (paneBusy) { notice("Claude 还在回复，回复结束后自动填入输入框"); return; }
+    if (Date.now() - paneFilledAt < PANE_REMIND_MS) { notice("已填入下方输入框，按回车发送", { hideAfter: 6000 }); return; }
+    paneBusy = true;
+    try {
+      if (!paneUrl) {
+        const r = await serverTool("widget_open", { title, code: finalCode, data: viz.data === undefined ? null : viz.data });
+        paneUrl = r.structuredContent && r.structuredContent.url;
+      }
+      if (!paneUrl) { notice("侧边打开失败：viz 服务没有返回链接"); return; }
+      report("open", { via: "prompt" });
+      if (await viz.sendPrompt(`在侧边浏览器打开小组件「${title}」：${paneUrl}`)) paneFilledAt = Date.now();
+    } catch (err) {
+      report("open", { error: err.message });
+      notice(`侧边打开失败：${err.message}`);
+    } finally {
+      paneBusy = false;
+    }
+  }
+
+  // ---------- toolbar ----------
+  $("viz-toolbar").addEventListener("click", async (e) => {
+    const act = e.target.dataset && e.target.dataset.act;
+    try {
+      if (act === "zoom" || act === "zoom-in") setZoom(zoomIndex + 1);
+      else if (act === "zoom-out") setZoom(zoomIndex - 1);
+      else if (act === "zoom-reset") setZoom(0);
+      else if (act === "open") await openInPane();
+      else if (act === "fullscreen") {
+        const r = await viz.fullscreen();
+        e.target.textContent = r && r.mode === "fullscreen" ? "退出全屏" : "全屏";
+      } else if (act === "download" && finalCode) {
+        const svg = $("root").querySelector(":scope > svg");
+        if (finalCode.trimStart().startsWith("<svg") && svg) {
+          const png = await download(`${safeName(title)}.png`, await svgToPng(svg));
+          const vec = await download(`${safeName(title)}.svg`, finalCode, "image/svg+xml");
+          if (png.path && vec.path) notice(`已保存 PNG 和 SVG 到 ${png.path.replace(/\/[^/]*$/, "")}`);
+        } else {
+          const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:-apple-system,"PingFang SC",sans-serif;margin:24px}</style></head><body>\n${finalCode}\n</body></html>`;
+          await download(`${safeName(title)}.html`, doc, "text/html");
+        }
+      }
+    } catch (err) { showError(`操作失败：${err.message || err}`); }
+  });
+
+  // ---------- rendering ----------
+  // innerHTML does not run <script>. Re-create each script in document order and
+  // wait for external ones, so inline code can use a library loaded just before it.
+  async function runScripts(container) {
+    for (const old of Array.from(container.querySelectorAll("script"))) {
+      const s = document.createElement("script");
+      for (const a of Array.from(old.attributes)) s.setAttribute(a.name, a.value);
+      if (old.src) {
+        await new Promise((resolve) => {
+          s.onload = () => { stillCharts(); resolve(); };
+          s.onerror = () => { showError(`脚本加载失败：${old.src}`); resolve(); };
+          old.replaceWith(s);
+        });
+      } else {
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      }
+    }
+  }
+
+  const stripScripts = (code) => code.replace(/<script[\s\S]*?(<\/script>|$)/gi, "");
+
+  function renderPartial(code) {
+    if (finalCode !== null || typeof code !== "string" || code.length < 40) return;
+    $("status").hidden = true;
+    // Show markup as it streams; scripts run only once the code is complete.
+    $("root").innerHTML = stripScripts(code);
+  }
+
+  async function renderFinal(args) {
+    if (finalCode !== null) return;
+    const code = args && (args.code ?? args.widget_code);
+    if (typeof code !== "string" || !code.trim()) return;
+    finalCode = code;
+    currentArgs = args;
+    if (args.title) title = args.title;
+    if (args.data !== undefined) deliverData(typeof args.data === "string" ? tryJson(args.data) : args.data);
+    $("status").hidden = true;
+    $("viz-toolbar").hidden = false;
+    $("root").innerHTML = code;
+    if (!code.trimStart().startsWith("<svg")) await runScripts($("root"));
+    report("rendered", { chars: code.length, svg: code.trimStart().startsWith("<svg"), hasData: args.data !== undefined, errors: errors.length });
+    // A widget mounted again from history gets no tool result with _meta; read data_file itself.
+    if (args.data_file) setTimeout(() => { if (!dataDelivered) fetchDataFile("no-tool-result"); }, 2500);
+  }
+  const tryJson = (s) => { try { return JSON.parse(s); } catch { return s; } };
+
+  let currentArgs = {}, dataDelivered = false, dataFetching = false;
+  function deliverData(value) {
+    if (dataDelivered) return;
+    dataDelivered = true;
+    viz.data = value;
+    if (typeof viz.onData === "function") viz.onData(value);
+    window.dispatchEvent(new CustomEvent("viz:data", { detail: value }));
+    resolveData(value);
+  }
+  async function fetchDataFile(why) {
+    if (dataDelivered || dataFetching || !currentArgs.data_file) return;
+    dataFetching = true;
+    try {
+      const r = await serverTool("widget_data", { data_file: currentArgs.data_file });
+      report("data-refetch", { why, ok: true });
+      deliverData(r.structuredContent && r.structuredContent.data);
+    } catch (err) {
+      report("data-refetch", { why, error: err.message });
+      showError(`读取 data_file 失败：${err.message}`);
+      deliverData(undefined);
+    }
+  }
+
+  function onToolResult(result) {
+    const extra = result && result._meta && result._meta["viz/data"];
+    report("tool-result", { hasMetaData: extra !== undefined, rows: Array.isArray(extra) ? extra.length : undefined, keys: Object.keys(result || {}) });
+    if (result && result.isError) showError(`工具报错：${(result.content || []).map((c) => c.text).join(" ")}`);
+    if (extra !== undefined) deliverData(extra);
+    else if (currentArgs.data_file) fetchDataFile("no-meta");
+    else deliverData(viz.data);
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== host) return;
+    const msg = event.data;
+    if (!msg || msg.jsonrpc !== "2.0") return;
+    if (msg.id !== undefined && pending.has(msg.id) && !msg.method) {
+      const p = pending.get(msg.id);
+      pending.delete(msg.id);
+      msg.error ? p.reject(msg.error) : p.resolve(msg.result);
+      return;
+    }
+    const params = msg.params || {};
+    switch (msg.method) {
+      case "ui/notifications/tool-input-partial":
+        renderPartial(params.arguments && (params.arguments.code ?? params.arguments.widget_code));
+        break;
+      case "ui/notifications/tool-input":
+        renderFinal(params.arguments || {});
+        break;
+      case "ui/notifications/tool-result":
+        onToolResult(params);
+        break;
+      case "ui/notifications/host-context-changed":
+        applyHostContext(params);
+        break;
+      default:
+        // Answer host requests we have no use for (e.g. teardown) so the host does not wait.
+        if (msg.id !== undefined && msg.method) post({ jsonrpc: "2.0", id: msg.id, result: {} });
+    }
+  });
+
+  new ResizeObserver(() => {
+    const rect = document.body.getBoundingClientRect();
+    notify("ui/notifications/size-changed", { width: Math.ceil(rect.width), height: Math.ceil(rect.height) });
+  }).observe(document.body);
+
+  if (standalone) {
+    document.body.classList.add("viz-standalone");
+    document.title = standalone.title || "visual";
+    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.dataset.theme = "dark";
+    for (const act of ["open", "fullscreen"]) document.querySelector(`[data-act="${act}"]`).remove();
+    renderFinal({ title: standalone.title, code: standalone.code, data: standalone.data === null ? undefined : standalone.data });
+    return;
+  }
+
+  request("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    appInfo: { name: "viz-widget", version: "0.6.0" },
+    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+  }).then((result) => {
+    hostInfo = result || {};
+    applyHostContext(hostInfo.hostContext);
+    const modes = hostInfo.hostContext && hostInfo.hostContext.availableDisplayModes;
+    if (modes && !modes.includes("fullscreen")) document.querySelector('[data-act="fullscreen"]').remove();
+    notify("ui/notifications/initialized");
+    const ctx = hostInfo.hostContext || {};
+    report("init", {
+      protocolVersion: hostInfo.protocolVersion,
+      hostInfo: hostInfo.hostInfo,
+      hostCapabilities: hostInfo.hostCapabilities,
+      theme: ctx.theme, displayMode: ctx.displayMode, availableDisplayModes: ctx.availableDisplayModes,
+      platform: ctx.platform, containerDimensions: ctx.containerDimensions,
+      styleVars: Object.keys((ctx.styles && ctx.styles.variables) || {}).length,
+      contextKeys: Object.keys(ctx),
+    });
+  }).catch((err) => showError(`宿主握手失败：${JSON.stringify(err)}`));
+})();
+</script>
+</body>
+</html>

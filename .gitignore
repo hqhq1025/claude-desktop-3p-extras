@@ -3,3 +3,4 @@ certs/
 *.pem
 *.srl
 .DS_Store
+__pycache__/
