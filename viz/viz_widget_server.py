@@ -327,7 +327,7 @@ def result_for(method, params):
         return {
             "protocolVersion": params.get("protocolVersion") or DEFAULT_PROTOCOL,
             "capabilities": {"tools": {}, "resources": {}},
-            "serverInfo": {"name": "viz", "version": "0.7.0"},
+            "serverInfo": {"name": "viz", "version": "0.7.1"},
         }
     if method == "ping":
         return {}
@@ -403,7 +403,7 @@ def send(msg):
 
 
 def main():
-    log("server-start", version="0.7.0")
+    log("server-start", version="0.7.1")
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -412,6 +412,9 @@ def main():
             msg = json.loads(line)
         except json.JSONDecodeError:
             send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}})
+            continue
+        if not isinstance(msg, dict):
+            send({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}})
             continue
         if "id" not in msg:
             continue  # notifications (initialized, cancelled, ...) need no reply
@@ -424,6 +427,9 @@ def main():
             send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": f"method not found: {method}"}})
         except LookupError as e:
             send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32602, "message": str(e)}})
+        except Exception as e:  # one failed request (e.g. an unreadable guide.md) must not end the server
+            log("request-error", method=method, error=repr(e))
+            send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32603, "message": f"{method} failed: {e!r}"}})
 
 
 if __name__ == "__main__":

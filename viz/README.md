@@ -30,11 +30,13 @@ Desktop 在沙箱 iframe 里加载 widget.html，把 code 和 data 交给页面�
 | `viz_widget_server.py` | MCP 服务，经 stdio 收发 JSON-RPC |
 | `widget.html` | 小组件页面：渲染 SVG 或 HTML 片段，提供 `viz` 接口和工具栏 |
 | `guide.md` | 给 Claude 看的设计与接口指南，工具 `read_me` 返回它的内容 |
-| `register.py` | 等 Desktop 退出后，把 viz 写进 Desktop 配置，再重新打开 Desktop |
+| `register.py` | 把前三个文件复制到安装目录；等 Desktop 退出后，把 viz 写进 Desktop 配置，再重新打开 Desktop |
 
 ## 3. 安装
 
-1. 把仓库放在一个固定的位置。Desktop 配置里记录的是 `viz_widget_server.py` 的路径，移动仓库后要重新注册。
+1. 仓库可以放在任何位置。`register.py` 把 `viz_widget_server.py`、`widget.html` 和 `guide.md` 复制到安装目录（默认 `~/.local/share/viz-widget`，用 `--dir` 指定其他目录），Desktop 配置里记录的是安装目录里的路径。
+
+   安装目录不能在 `~/Documents`、`~/Desktop`、`~/Downloads` 或 iCloud 云盘下。这些目录受 macOS 隐私保护（TCC）。Desktop 给 Code 会话启动服务的进程不一定有访问权限，服务会随机报 `Operation not permitted` 并退出，界面显示 viz 不可用。用符号链接指向这些目录也一样会失败。
 2. 查看将要写入的配置：
 
    ```bash
@@ -96,14 +98,16 @@ Desktop 在沙箱 iframe 里加载 widget.html，把 code 和 data 交给页面�
   ```
 
   对其中的 Python 进程发送 SIGTERM。当前会话缓存的工具说明要等新会话才更新。
-- `guide.md` 在每次调用 `read_me` 时重新读取，改了立即生效。
+- 改完仓库里的文件后，运行 `python3 viz/register.py --sync`（装在其他目录时加同样的 `--dir`），把文件复制到安装目录。只复制文件，不改 Desktop 配置。
+- `guide.md` 在每次调用 `read_me` 时重新读取，同步后立即生效。
+- 单个请求出错（例如读不到文件）时，服务返回 JSON-RPC 错误并记进日志（事件 `request-error`），进程继续运行。
 - 服务和页面把事件写进 `~/Library/Logs/viz-widget/server.log`，包括工具调用、页面版本、宿主能力、渲染结果、脚本错误和按钮操作。工具返回“Rendered … inline”只说明服务收到了调用。要确认页面是否真的显示出来，看日志里有没有 `widget:rendered`。
 
 ## 7. SSH 远程会话
 
 在 SSH 远程会话里，Desktop 把本机的 MCP 服务交给远程主机，由远程主机按同一条命令启动。实测发现，远程会话里的 MCP App 小组件不会显示，脚本也不执行。所以服务在非 macOS 主机上不提供任何工具，以免 Claude 以为图已经显示。远程会话里可以改用 Markdown 图片：把 SVG 或 PNG 写在远程会话的工作目录里，在回复中用绝对路径引用。
 
-如果仓库在本机的主目录下，`register.py` 写入的命令是相对 `$HOME` 的路径。远程主机的同一位置没有这些文件时，远程会话会提示 viz 启动失败，但不影响其他功能。想去掉这个提示，就把 `viz/` 目录复制到远程主机的同一位置。
+安装目录在本机的主目录下时，`register.py` 写入的命令是相对 `$HOME` 的路径（默认 `$HOME/.local/share/viz-widget/viz_widget_server.py`）。远程主机的同一位置没有这些文件时，远程会话会提示 viz 启动失败，但不影响其他功能。想去掉这个提示，就把安装目录里的 `viz_widget_server.py`、`widget.html` 和 `guide.md` 复制到远程主机的同一位置。
 
 ## 8. 安全说明
 
