@@ -12,10 +12,21 @@
     --viz-surface: var(--color-background-secondary, #f6f8fa);
     --viz-bg: var(--color-background-primary, #ffffff);
     --viz-accent: #d97757;
+    --viz-info: #2563eb;
     --viz-danger: #d1242f;
     --viz-font: var(--font-sans, -apple-system, "PingFang SC", sans-serif);
     --viz-mono: var(--font-mono, ui-monospace, Menlo, monospace);
     font-family: var(--viz-font);
+    /* Aliases for token names models know from other widget hosts, so such code
+       still follows this page's theme. */
+    --text-primary: var(--viz-fg); --text-secondary: var(--viz-muted); --text-muted: var(--viz-muted);
+    --text-accent: var(--viz-info); --text-danger: var(--viz-danger);
+    --surface-0: var(--viz-bg); --surface-1: var(--viz-surface);
+    --surface-2: color-mix(in srgb, var(--viz-surface) 70%, var(--viz-fg) 6%);
+    --border: var(--viz-border); --border-strong: color-mix(in srgb, var(--viz-border) 60%, var(--viz-fg) 40%);
+    --bg-accent: color-mix(in srgb, var(--viz-info) 14%, transparent); --border-accent: var(--viz-info);
+    --radius: 8px;
+    --p: var(--text-primary); --s: var(--text-secondary); --t: var(--text-muted); --b: var(--border); --bg2: var(--surface-1);
   }
   :root[data-theme="dark"] {
     --viz-fg: var(--color-text-primary, #e6edf3);
@@ -23,9 +34,49 @@
     --viz-border: var(--color-border-primary, #3d444d);
     --viz-surface: var(--color-background-secondary, #1c2128);
     --viz-bg: var(--color-background-primary, #0d1117);
+    --viz-info: #60a5fa;
     --viz-danger: #ff7b72;
   }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   html, body { margin: 0; padding: 0; background: transparent; color: var(--viz-fg); }
+  /* In the chat the frame grows with the content, so a vertical scrollbar would
+     only steal width and cause a reflow; wide content can still scroll sideways. */
+  html:not(.viz-standalone) { overflow-y: hidden; overflow-x: auto; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* SVG kit: text sizes, neutral shapes, connectors, and color ramps that switch
+     with the theme. A ramp class on a <g> colors the shapes and text inside it. */
+  #root svg .t, #root svg .th { font-size: 14px; fill: var(--viz-fg); }
+  #root svg .th { font-weight: 500; }
+  #root svg .ts { font-size: 12px; fill: var(--viz-muted); }
+  :where(#root svg) text { font-family: var(--viz-font); }
+  #root svg .box { fill: var(--viz-surface); stroke: var(--viz-border); stroke-width: 1; }
+  #root svg .arr { fill: none; stroke: var(--viz-muted); stroke-width: 1.5; }
+  #root svg .leader { fill: none; stroke: var(--viz-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  #root svg .node { cursor: pointer; }
+  #root svg .node:hover > :is(rect, circle, ellipse, polygon) { stroke-width: 2; }
+  .c-blue   { --rf: #dbeafe; --rs: #3b82f6; --rt: #1e40af; }
+  .c-teal   { --rf: #ccfbf1; --rs: #14b8a6; --rt: #115e59; }
+  .c-green  { --rf: #dcfce7; --rs: #22c55e; --rt: #166534; }
+  .c-amber  { --rf: #fef3c7; --rs: #f59e0b; --rt: #92400e; }
+  .c-red    { --rf: #fee2e2; --rs: #ef4444; --rt: #991b1b; }
+  .c-purple { --rf: #ede9fe; --rs: #8b5cf6; --rt: #5b21b6; }
+  .c-coral  { --rf: #ffedd5; --rs: #f97316; --rt: #9a3412; }
+  .c-pink   { --rf: #fce7f3; --rs: #ec4899; --rt: #9d174d; }
+  .c-gray   { --rf: #f3f4f6; --rs: #9ca3af; --rt: #374151; }
+  :root[data-theme="dark"] .c-blue   { --rf: #172554; --rs: #60a5fa; --rt: #bfdbfe; }
+  :root[data-theme="dark"] .c-teal   { --rf: #042f2e; --rs: #2dd4bf; --rt: #99f6e4; }
+  :root[data-theme="dark"] .c-green  { --rf: #052e16; --rs: #4ade80; --rt: #bbf7d0; }
+  :root[data-theme="dark"] .c-amber  { --rf: #451a03; --rs: #fbbf24; --rt: #fde68a; }
+  :root[data-theme="dark"] .c-red    { --rf: #450a0a; --rs: #f87171; --rt: #fecaca; }
+  :root[data-theme="dark"] .c-purple { --rf: #2e1065; --rs: #a78bfa; --rt: #ddd6fe; }
+  :root[data-theme="dark"] .c-coral  { --rf: #431407; --rs: #fb923c; --rt: #fed7aa; }
+  :root[data-theme="dark"] .c-pink   { --rf: #500724; --rs: #f472b6; --rt: #fbcfe8; }
+  :root[data-theme="dark"] .c-gray   { --rf: #1f2937; --rs: #6b7280; --rt: #e5e7eb; }
+  #root svg :is(.c-blue, .c-teal, .c-green, .c-amber, .c-red, .c-purple, .c-coral, .c-pink, .c-gray) :is(rect, circle, ellipse, polygon),
+  #root svg :is(rect, circle, ellipse, polygon):is(.c-blue, .c-teal, .c-green, .c-amber, .c-red, .c-purple, .c-coral, .c-pink, .c-gray) { fill: var(--rf); stroke: var(--rs); }
+  #root svg :is(.c-blue, .c-teal, .c-green, .c-amber, .c-red, .c-purple, .c-coral, .c-pink, .c-gray) :is(text, .t, .th, .ts) { fill: var(--rt); }
+  #root svg :is(.c-blue, .c-teal, .c-green, .c-amber, .c-red, .c-purple, .c-coral, .c-pink, .c-gray) .ts { opacity: .8; }
   body { position: relative; }
   #status { color: var(--viz-muted); font-size: 13px; padding: 8px 2px; }
   #root svg { max-width: 100%; height: auto; }
@@ -46,16 +97,16 @@
   .viz-table-wrap { overflow: auto; max-height: var(--viz-table-max-height, 420px); border: 1px solid var(--viz-border); border-radius: 8px; }
   .viz-table { border-collapse: collapse; width: 100%; font-size: 13px; }
   .viz-table th, .viz-table td { padding: 6px 10px; border-bottom: 1px solid var(--viz-border); text-align: left; white-space: nowrap; }
-  .viz-table th { position: sticky; top: 0; background: var(--viz-surface); cursor: pointer; user-select: none; font-weight: 600; }
+  .viz-table th { position: sticky; top: 0; background: var(--viz-surface); cursor: pointer; user-select: none; font-weight: 500; }
   .viz-table td.num, .viz-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .viz-table tr:hover td { background: var(--viz-surface); }
   .viz-filter { margin: 0 0 6px; width: 220px; }
   .viz-input, .viz-filter { font: 13px var(--viz-font); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--viz-border); background: var(--viz-bg); color: var(--viz-fg); }
   .viz-form { display: grid; gap: 12px; font-size: 13px; }
-  .viz-form label.q { display: block; font-weight: 600; margin-bottom: 6px; }
+  .viz-form label.q { display: block; font-weight: 500; margin-bottom: 6px; }
   .viz-pills { display: flex; flex-wrap: wrap; gap: 6px; }
   .viz-pill { font: 13px var(--viz-font); padding: 4px 12px; border-radius: 999px; border: 1px solid var(--viz-border); background: transparent; color: var(--viz-fg); cursor: pointer; }
-  .viz-pill[aria-pressed="true"] { border-color: var(--viz-accent); background: var(--viz-accent); color: #fff; }
+  .viz-pill[aria-pressed="true"] { border-color: var(--viz-info); background: var(--bg-accent); color: var(--viz-fg); box-shadow: inset 0 0 0 1px var(--viz-info); }
   .viz-btn { font: 13px var(--viz-font); padding: 6px 14px; border-radius: 6px; border: 1px solid var(--viz-accent); background: var(--viz-accent); color: #fff; cursor: pointer; justify-self: start; }
   .viz-btn:disabled { opacity: .5; cursor: default; }
   #viz-notice { margin-top: 8px; font-size: 12px; color: var(--viz-muted); padding: 4px 8px; border-radius: 6px; border: 1px dashed var(--viz-border); }
@@ -72,16 +123,26 @@
   <button type="button" data-act="zoom">放大</button>
   <button type="button" data-act="open">侧边打开</button>
   <button type="button" data-act="fullscreen">全屏</button>
+  <button type="button" data-act="copy">复制图片</button>
   <button type="button" data-act="download">保存</button>
 </div>
 <div id="status">正在生成可视化…</div>
 <div id="viz-viewport"><div id="root"></div></div>
+<!-- Shared marker, placed after the content so a widget's own #arrow wins: any SVG on the page can end a path with marker-end="url(#arrow)";
+     it takes the color of the line that uses it. -->
+<svg id="viz-defs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+    <path d="M1 1L8 5L1 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs></svg>
 <div id="viz-notice" role="status" hidden></div>
 <script>
 (() => {
   // Standalone: the viz server serves this same page for the side browser pane
   // ("侧边打开") with the widget arguments injected; there is no host to talk to.
   const standalone = window.__VIZ_STANDALONE__ || null;
+  // The page as served, before rendering: what "保存" writes for the stand-alone copy.
+  const PRISTINE = standalone ? "<!doctype html>\n" + document.documentElement.outerHTML : null;
   const host = standalone ? null : window.parent;
   const pending = new Map();
   let nextId = 1;
@@ -99,7 +160,7 @@
     post({ jsonrpc: "2.0", id, method, params });
   });
   const $ = (id) => document.getElementById(id);
-  const PAGE_VERSION = "0.6.1";
+  const PAGE_VERSION = "0.8.0";
 
   // Diagnostics go to the viz server's log (~/Library/Logs/viz-widget/server.log)
   // through the host's tools/call proxy, so problems are visible without screenshots.
@@ -196,27 +257,101 @@
     }
   }
 
+  // Makes a self-contained copy of an SVG on the page: the page's classes,
+  // variables and shared #arrow marker do not exist outside it, so the computed
+  // styles are written onto each element and used markers are copied in.
+  const EXPORT_PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
+    "stroke-linecap", "stroke-linejoin", "opacity", "font-family", "font-size", "font-weight", "font-style",
+    "text-anchor", "dominant-baseline", "letter-spacing", "visibility", "display", "marker-start", "marker-mid",
+    "marker-end", "transform", "clip-path", "mask", "filter", "paint-order", "stroke-dashoffset", "fill-rule", "stroke-miterlimit"];
+  // Computed url() values carry the page address; the file needs plain #ids.
+  const localUrls = (v) => v.replace(/url\("?[^)"]*#([\w-]+)"?\)/g, "url(#$1)");
+  function exportSvg(svgEl) {
+    const clone = svgEl.cloneNode(true);
+    const src = [svgEl, ...svgEl.querySelectorAll("*")], dst = [clone, ...clone.querySelectorAll("*")];
+    src.forEach((el, i) => {
+      if (!(el instanceof SVGElement) || el.closest("defs, marker, symbol")) return;
+      const cs = getComputedStyle(el);
+      dst[i].setAttribute("style", localUrls(EXPORT_PROPS.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(";")));
+      dst[i].removeAttribute("class");
+    });
+    // Code that runs or loads things must not travel with a saved file.
+    clone.querySelectorAll("script, foreignObject iframe").forEach((n) => n.remove());
+    for (const n of clone.querySelectorAll("*")) for (const a of [...n.attributes]) if (/^on/i.test(a.name)) n.removeAttribute(a.name);
+    const ids = new Set();
+    for (const n of svgEl.querySelectorAll("[marker-start], [marker-mid], [marker-end], [style*='marker']"))
+      for (const p of ["marker-start", "marker-mid", "marker-end"]) {
+        const m = /#([\w-]+)/.exec(n.getAttribute(p) || getComputedStyle(n).getPropertyValue(p) || "");
+        if (m) ids.add(m[1]);
+      }
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const muted = getComputedStyle(document.documentElement).getPropertyValue("--viz-muted").trim() || "#666";
+    for (const id of ids) {
+      if (clone.querySelector(`#${CSS.escape(id)}`)) continue;
+      const m = document.getElementById(id);
+      if (!m) continue;
+      const copy = m.cloneNode(true);
+      // context-stroke is not drawn by every SVG viewer.
+      copy.querySelectorAll("[stroke='context-stroke']").forEach((n) => n.setAttribute("stroke", muted));
+      defs.appendChild(copy);
+    }
+    if (defs.childNodes.length) clone.insertBefore(defs, clone.firstChild);
+    const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+    const box = svgEl.getBoundingClientRect();
+    const w = vb && vb.width ? vb.width : box.width, h = vb && vb.height ? vb.height : box.height;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", w); clone.setAttribute("height", h);
+    // A background, so text drawn for a dark chat stays readable in any viewer.
+    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const x0 = vb && vb.width ? vb.x : 0, y0 = vb && vb.width ? vb.y : 0;
+    bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", w); bg.setAttribute("height", h);
+    bg.setAttribute("fill", getComputedStyle(document.documentElement).getPropertyValue("--viz-bg").trim() || "#fff");
+    clone.insertBefore(bg, defs.parentNode ? defs.nextSibling : clone.firstChild);
+    return { text: new XMLSerializer().serializeToString(clone), width: w, height: h };
+  }
+
+  // PNG at 2x the drawing size, at most 16 megapixels.
   function svgToPng(svgEl, scale = 2) {
     return new Promise((resolve, reject) => {
-      const clone = svgEl.cloneNode(true);
-      const box = svgEl.getBoundingClientRect();
-      clone.setAttribute("width", box.width); clone.setAttribute("height", box.height);
-      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      // Resolve CSS variables so the exported file keeps its colors outside this page.
-      const cs = getComputedStyle(document.documentElement);
-      let text = new XMLSerializer().serializeToString(clone).replace(/var\((--[\w-]+)(?:,[^)]*)?\)/g, (m, v) => cs.getPropertyValue(v).trim() || m);
+      const { text, width, height } = exportSvg(svgEl);
+      const s = Math.min(scale, Math.sqrt(16e6 / Math.max(1, width * height)));
       const img = new Image();
       img.onload = () => {
         const c = document.createElement("canvas");
-        c.width = Math.ceil(box.width * scale); c.height = Math.ceil(box.height * scale);
-        const g = c.getContext("2d");
-        g.fillStyle = cs.getPropertyValue("--viz-bg").trim() || "#fff"; g.fillRect(0, 0, c.width, c.height);
-        g.drawImage(img, 0, 0, c.width, c.height);
+        c.width = Math.ceil(width * s); c.height = Math.ceil(height * s);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
         c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
       };
       img.onerror = () => reject(new Error("SVG could not be rasterized"));
       img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(text);
     });
+  }
+
+  // PNG of an HTML widget, through html-to-image (MIT) from the CDN.
+  async function htmlToPng() {
+    if (!window.htmlToImage) await loadScript("https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js");
+    const root = $("root");
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--viz-bg").trim() || "#fff";
+    return window.htmlToImage.toBlob(root, { pixelRatio: 2, backgroundColor: bg, width: root.scrollWidth, height: root.scrollHeight });
+  }
+  function widgetPng() {
+    const svg = $("root").querySelector(":scope > svg");
+    return finalCode.trimStart().startsWith("<svg") && svg ? svgToPng(svg) : htmlToPng();
+  }
+
+  // Copies a PNG of the widget. The browser clipboard needs the host's
+  // clipboard-write permission; without it the viz server puts the image on the
+  // macOS clipboard.
+  async function copyImage() {
+    const png = await widgetPng();
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      report("copy", { via: "browser", bytes: png.size });
+    } catch (err) {
+      await serverTool("widget_copy", { base64: await toBase64(png) });
+      report("copy", { via: "server", bytes: png.size, browserError: String(err && err.message || err) });
+    }
+    notice("已复制图片", { hideAfter: 3000 });
   }
 
   // Desktop snapshots the side-pane page for the chat's browser card as it loads;
@@ -399,7 +534,12 @@
     whenData: () => dataReady,
     get host() { return hostInfo; },
     get theme() { return document.documentElement.dataset.theme || "light"; },
-    palette: ["#d97757", "#3b7dd8", "#3fb76f", "#d4a72c", "#a371f7", "#e5534b", "#39c5cf", "#8b949e"],
+    // Series colors in a fixed order (blue, amber, teal, purple, coral, green, pink, gray), tuned per theme.
+    get palette() {
+      return document.documentElement.dataset.theme === "dark"
+        ? ["#60a5fa", "#fbbf24", "#2dd4bf", "#a78bfa", "#fb923c", "#4ade80", "#f472b6", "#9ca3af"]
+        : ["#2563eb", "#d97706", "#0d9488", "#7c3aed", "#ea580c", "#16a34a", "#db2777", "#6b7280"];
+    },
     sendPrompt,
     setContext: (value) => { contextState = value; return pushContext(); },
     openLink: (url) => request("ui/open-link", { url: String(url) }).catch(() => {}),
@@ -420,19 +560,47 @@
   window.sendPrompt = viz.sendPrompt;
   window.openLink = viz.openLink;
 
-  // Links: the sandbox cannot navigate, so hand them to the host.
+  // Links, downloads and forms: the sandbox cannot navigate or save, so links go
+  // to the host and downloads to download(). Chart libraries export through an
+  // <a download> they never attach to the page, hence the click() override.
+  const OPENABLE = /^(https?:|mailto:|tel:|sms:)/i;
+  function handleAnchor(a) {
+    const href = a.getAttribute("href") || a.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
+    // The stand-alone page is an ordinary tab that saves by itself (download()
+    // clicks such a link there too), so only the framed widget redirects them.
+    if (!standalone && a.hasAttribute("download") && /^(data|blob):/.test(href)) {
+      const name = a.getAttribute("download") || "download";
+      // data: is decoded here, since the frame's CSP may not let fetch() read it.
+      const m = /^data:([^,;]*)((?:;[^,;]*)*?)(;base64)?,(.*)$/s.exec(href);
+      if (m) {
+        const body = m[3] ? Uint8Array.from(atob(m[4]), (c) => c.charCodeAt(0)) : decodeURIComponent(m[4]);
+        download(name, new Blob([body], { type: m[1] || "application/octet-stream" }));
+      } else {
+        fetch(href).then((r) => r.blob()).then((b) => download(name, b))
+          .catch((err) => notice(`保存失败：${err.message || err}`));
+      }
+      return true;
+    }
+    if (OPENABLE.test(href)) { viz.openLink(href); return true; }
+    return /^javascript:/i.test(href);  // never run these; in-page #anchors keep working
+  }
   document.addEventListener("click", (e) => {
     const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
-    if (!a) return;
-    const href = a.getAttribute("href");
-    if (a.hasAttribute("download") && href.startsWith("data:")) {
-      e.preventDefault();
-      fetch(href).then((r) => r.blob()).then((b) => download(a.getAttribute("download") || "download", b));
-    } else if (/^https?:/.test(href)) {
-      e.preventDefault();
-      viz.openLink(href);
-    }
+    if (a && handleAnchor(a)) e.preventDefault();
   });
+  const anchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { if (this.isConnected || !handleAnchor(this)) anchorClick.call(this); };
+  window.open = (url) => { if (url && OPENABLE.test(String(url))) viz.openLink(url); return null; };
+  // A submitted form would navigate the frame to a blank page.
+  document.addEventListener("submit", (e) => { if (!e.defaultPrevented && (e.target.method || "") !== "dialog") e.preventDefault(); });
+  // form.submit() fires no submit event natively; firing one lets page handlers
+  // run, and the guard stops handlers that call submit() again from looping.
+  let inSubmit = false;
+  HTMLFormElement.prototype.submit = function () {
+    if (inSubmit) return;
+    inSubmit = true;
+    try { this.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true })); } finally { inSubmit = false; }
+  };
 
   // ---------- zoom ----------
   // CSS zoom on #root, with #root pinned to its natural width so the content is
@@ -522,6 +690,7 @@
       else if (act === "zoom-out") setZoom(zoomIndex - 1);
       else if (act === "zoom-reset") setZoom(0);
       else if (act === "open") await openInPane();
+      else if (act === "copy" && finalCode) await copyImage();
       else if (act === "fullscreen") {
         const r = await viz.fullscreen();
         e.target.textContent = r && r.mode === "fullscreen" ? "退出全屏" : "全屏";
@@ -529,11 +698,18 @@
         const svg = $("root").querySelector(":scope > svg");
         if (finalCode.trimStart().startsWith("<svg") && svg) {
           const png = await download(`${safeName(title)}.png`, await svgToPng(svg));
-          const vec = await download(`${safeName(title)}.svg`, finalCode, "image/svg+xml");
+          const vec = await download(`${safeName(title)}.svg`, exportSvg(svg).text, "image/svg+xml");
           if (png.path && vec.path) notice(`已保存 PNG 和 SVG 到 ${png.path.replace(/\/[^/]*$/, "")}`);
+        } else if (standalone) {
+          // This page already is the stand-alone copy: save it as it was served.
+          await download(`${safeName(title)}.html`, PRISTINE, "text/html");
         } else {
-          const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:-apple-system,"PingFang SC",sans-serif;margin:24px}</style></head><body>\n${finalCode}\n</body></html>`;
-          await download(`${safeName(title)}.html`, doc, "text/html");
+          // The server builds the same stand-alone page as the side pane, so the
+          // file keeps the theme, the viz helpers and the data.
+          const r = await serverTool("widget_save", { name: `${safeName(title)}.html`, page: { title, code: finalCode, data: viz.data === undefined ? null : viz.data } });
+          const path = r.structuredContent && r.structuredContent.path;
+          report("download", { name: `${title}.html`, via: "server-page", path });
+          notice(`已保存到 ${path}`);
         }
       }
     } catch (err) { showError(`操作失败：${err.message || err}`); }
@@ -580,9 +756,27 @@
     $("viz-toolbar").hidden = false;
     $("root").innerHTML = code;
     if (!code.trimStart().startsWith("<svg")) await runScripts($("root"));
+    else fitViewBox($("root").querySelector(":scope > svg"));
     report("rendered", { chars: code.length, svg: code.trimStart().startsWith("<svg"), hasData: args.data !== undefined, errors: errors.length });
     // A widget mounted again from history gets no tool result with _meta; read data_file itself.
     if (args.data_file) setTimeout(() => { if (!dataDelivered) fetchDataFile("no-tool-result"); }, 2500);
+  }
+  // Text and shapes placed past the viewBox edge are cut off; grow the viewBox to
+  // the drawn content (plus a small margin) instead of losing them.
+  function fitViewBox(svg) {
+    const vb = svg && svg.viewBox && svg.viewBox.baseVal;
+    if (!vb || !vb.width) return;
+    let b;
+    try { b = svg.getBBox(); } catch { return; }
+    if (!b.width && !b.height) return;  // not laid out yet
+    const over = b.x < vb.x - 1 || b.y < vb.y - 1 || b.x + b.width > vb.x + vb.width + 1 || b.y + b.height > vb.y + vb.height + 1;
+    if (over) {
+      const pad = 4, x0 = Math.min(vb.x, b.x - pad), y0 = Math.min(vb.y, b.y - pad);
+      const x1 = Math.max(vb.x + vb.width, b.x + b.width + pad), y1 = Math.max(vb.y + vb.height, b.y + b.height + pad);
+      const before = `${vb.x} ${vb.y} ${vb.width} ${vb.height}`;
+      svg.setAttribute("viewBox", `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
+      report("viewbox-fit", { before, after: svg.getAttribute("viewBox") });
+    }
   }
   const tryJson = (s) => { try { return JSON.parse(s); } catch { return s; } };
 
@@ -655,6 +849,7 @@
 
   if (standalone) {
     document.body.classList.add("viz-standalone");
+    document.documentElement.classList.add("viz-standalone");
     document.title = standalone.title || "visual";
     if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.dataset.theme = "dark";
     for (const act of ["open", "fullscreen"]) document.querySelector(`[data-act="${act}"]`).remove();
@@ -664,7 +859,7 @@
 
   request("ui/initialize", {
     protocolVersion: "2026-01-26",
-    appInfo: { name: "viz-widget", version: "0.6.0" },
+    appInfo: { name: "viz-widget", version: PAGE_VERSION },
     appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
   }).then((result) => {
     hostInfo = result || {};

@@ -59,10 +59,11 @@ Desktop 在沙箱 iframe 里加载 widget.html，把 code 和 data 交给页面�
 
 在新的 Code 会话里让 Claude 画图，例如“把这份 CSV 画成柱状图”。Claude 先调用 `read_me` 读设计指南，再调用 `show_widget`。
 
-- `code` 以 `<svg` 开头时按 SVG 渲染，否则按 HTML 片段渲染，`<script>` 会执行。
+- `widget_code` 以 `<svg` 开头时按 SVG 渲染，否则按 HTML 片段渲染，`<script>` 会执行。0.8 之前的字段名 `code` 仍然接受。
 - `data` 传 JSON。`data_file` 传本机 CSV、TSV、JSON 或 JSONL 文件的绝对路径（不超过 5 MB），服务读取后直接交给页面，模型只收到行数、列名和几行样例。
 - 页面里有全局对象 `viz`，提供 `sendPrompt`、`setContext`、`table`、`form`、`loadScript`、`download` 等接口，详见 `guide.md`。
-- 页面颜色跟随对话的深浅色主题。脚本可以从 cdn.jsdelivr.net、unpkg.com 和 cdnjs.cloudflare.com 加载图表库。
+- 页面颜色跟随对话的深浅色主题。页面预置了一套 SVG 类：文字 `t`、`ts`、`th`，中性盒子 `box`，连线 `arr`、`leader`，9 条深浅自适应的色带 `c-blue`、`c-teal` 等，以及共用的箭头 `#arrow`。另有常见 token 名的别名，例如 `--text-primary`、`--surface-1`、`--border`。
+- 脚本、样式和字体可以从 cdn.jsdelivr.net、unpkg.com、cdnjs.cloudflare.com 和 esm.sh 加载；`fetch` 也可以访问这四个域名，例如读取地图数据。
 
 小组件在这一轮回复结束后才显示。鼠标移到小组件上，右上角会出现工具栏：
 
@@ -70,7 +71,10 @@ Desktop 在沙箱 iframe 里加载 widget.html，把 code 和 data 交给页面�
 |---|---|
 | 放大 | 在小组件内放大到 150% 到 400%，可以拖动，或按住 Ctrl 或 ⌘ 用滚轮缩放 |
 | 侧边打开 | 把打开请求填进输入框，按回车后 Claude 在右侧浏览器面板打开一份副本 |
-| 保存 | SVG 图保存为 PNG 和 SVG，HTML 保存为单个 HTML 文件，写进 `~/Downloads` |
+| 复制图片 | 把图复制成 PNG。宿主不允许页面写剪贴板时，由服务写进 macOS 剪贴板 |
+| 保存 | SVG 图保存为 PNG 和 SVG，导出的 SVG 自带样式和箭头定义；HTML 保存为可以离线打开的完整页面，主题、`viz` 接口和数据都保留。文件写进 `~/Downloads` |
+
+页面还会接管几类操作：`window.open` 和外链交给宿主打开，图表库自带的“导出图片”链接转成保存，表单的原生提交被拦下，避免框架跳到空白页。SVG 的内容超出 `viewBox` 时，页面会自动扩大 `viewBox`。
 
 侧边副本：每次调用 `show_widget`，服务都会在 `127.0.0.1` 的随机端口上存一份同样的页面，并在工具结果里附上链接。图的细节较多时，Claude 会在同一轮用内置浏览器打开这个链接。这时右侧面板显示大图，对话里还会出现一张带缩略图的浏览器卡片。这需要在 3p 配置里打开内置浏览器（`"builtinBrowserEnabled": true`）。侧边副本不能给 Claude 发消息，所以表单和追问按钮只在对话里的小组件上有效。
 
@@ -87,6 +91,15 @@ Desktop 在沙箱 iframe 里加载 widget.html，把 code 和 data 交给页面�
 | `ui/message` 通常只把文字填进输入框，并且每次都追加 | 提示按回车；同一个请求不会重复填入 |
 | 每个小组件只保留最后一次 `ui/update-model-context` | `viz.setContext` 和错误信息合并成一次发送。用户下次发消息时，Claude 才能读到 |
 | 从历史记录重新显示小组件时，不再提供工具结果里的数据 | 页面通过服务重新读取 `data_file` |
+
+下面几项来自对 Desktop 4.4212.0 渲染端代码的阅读，没有逐项实测。Code 页签按 `server.isBuiltIn` 区分内置的 visualize 小组件和第三方 MCP App，改工具名或服务名都不能让第三方服务变成内置服务。
+
+| 内置 visualize 有、第三方没有 | viz 的处理 |
+|---|---|
+| 边生成边显示（`tool-input-partial`）。第三方小组件要等工具调用结束才挂载 | 无法补；guide 要求脚本放最后，内容先写 |
+| 工具卡片上的 `loading_messages` | 不提供这个参数 |
+| 宿主代为复制、下载（`ui/download-file`）、直接发送消息 | 复制和保存由服务完成；消息只能填进输入框 |
+| `ui/open-link` 免确认 | 第三方的链接只接受 https、mailto、tel、sms，打开前宿主会请用户确认 |
 
 ## 6. 更新与诊断
 

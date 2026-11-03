@@ -27,7 +27,9 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -36,8 +38,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # hash of widget.html: an edited page gets a new URI after the server restarts.
 WIDGET_URI_RE = re.compile(r"ui://viz/widget(-[0-9a-f]{8})?\.html")
 WIDGET_MIME = "text/html;profile=mcp-app"
-# Script/style/font/image origins the widget may load from (MCP Apps CSP).
-RESOURCE_DOMAINS = ["https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com"]
+# Origins the widget may load scripts, styles, fonts and images from, and fetch
+# data from (e.g. map topologies), through the MCP Apps CSP.
+CDN_DOMAINS = ["https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://esm.sh"]
+RESOURCE_DOMAINS = CDN_DOMAINS + ["https://fonts.googleapis.com", "https://fonts.gstatic.com"]
 DEFAULT_PROTOCOL = "2025-06-18"
 MAX_DATA_FILE_BYTES = 5 * 1024 * 1024
 DATA_EXTS = {".csv", ".tsv", ".json", ".jsonl"}
@@ -52,7 +56,7 @@ SHOW_WIDGET = {
         "any visual explanation.\n"
         "IMPORTANT: call read_me once before your first show_widget in a conversation; do not "
         "mention that call to the user.\n"
-        "The code is auto-detected: if it starts with <svg it is rendered as SVG, otherwise "
+        "widget_code is auto-detected: if it starts with <svg it is rendered as SVG, otherwise "
         "as an HTML fragment (no <html>/<head>/<body>; <style> and <script> work). The page "
         "follows the chat's light/dark theme: use the --viz-* CSS variables, never hard-coded "
         "text or background colors. A global `viz` object offers sendPrompt, setContext, "
@@ -68,8 +72,21 @@ SHOW_WIDGET = {
     "inputSchema": {
         "type": "object",
         "properties": {
-            "title": {"type": "string", "description": "Short title of the visual, in the user's language."},
-            "code": {"type": "string", "description": "SVG markup or an HTML fragment."},
+            "title": {
+                "type": "string",
+                "description": (
+                    "Specific name of this visual in the user's language, e.g. 'Q4 各产品线营收' rather than "
+                    "'图表'. It names saved files and the side-pane page, and tells visuals apart."
+                ),
+            },
+            "widget_code": {
+                "type": "string",
+                "description": (
+                    "SVG markup starting with <svg>, or an HTML fragment without <html>/<head>/<body>. "
+                    "Put a short <style> first, then the content, then <script>; scripts run after the "
+                    "whole code has arrived."
+                ),
+            },
             "data": {"description": "Optional JSON data for the widget, available as viz.data."},
             "data_file": {
                 "type": "string",
@@ -80,7 +97,7 @@ SHOW_WIDGET = {
                 ),
             },
         },
-        "required": ["code"],
+        "required": ["widget_code"],
     },
 }
 
@@ -107,9 +124,24 @@ WIDGET_SAVE = {
     "description": "Internal: the viz widget page saves exported files here. Do not call it yourself.",
     "inputSchema": {
         "type": "object",
-        "properties": {"name": {"type": "string"}, "base64": {"type": "string"}, "text": {"type": "string"}},
+        "properties": {
+            "name": {"type": "string"},
+            "base64": {"type": "string"},
+            "text": {"type": "string"},
+            "page": {"type": "object", "description": "{title, code, data}: save the stand-alone page of a widget."},
+        },
         "required": ["name"],
     },
+    "_meta": {"ui": {"visibility": ["app"]}},
+}
+
+# Called by the widget page for "复制图片" when the browser clipboard is not
+# allowed in the host's frame: puts a PNG on the macOS clipboard.
+WIDGET_COPY = {
+    "name": "widget_copy",
+    "title": "Copy widget image",
+    "description": "Internal: the viz widget page copies a PNG to the clipboard here. Do not call it yourself.",
+    "inputSchema": {"type": "object", "properties": {"base64": {"type": "string"}}, "required": ["base64"]},
     "_meta": {"ui": {"visibility": ["app"]}},
 }
 
@@ -240,7 +272,9 @@ def summarize(data):
 
 def save_download(args):
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", str(args.get("name") or "download")).strip(". ") or "download"
-    if args.get("base64") is not None:
+    if isinstance(args.get("page"), dict):
+        payload = standalone_html(args["page"]).encode("utf-8")
+    elif args.get("base64") is not None:
         payload = base64.b64decode(args["base64"])
     else:
         payload = str(args.get("text") or "").encode("utf-8")
@@ -263,6 +297,30 @@ _http = None
 _http_lock = threading.Lock()
 
 
+def standalone_html(page):
+    """widget.html with the widget arguments injected; it renders without a host."""
+    page = {"title": page.get("title") or "visual", "code": page.get("code") or "", "data": page.get("data")}
+    # No "<" at all inside the script, so "</script>" and "<!--" in code or data cannot end or derail it.
+    payload = json.dumps(page, ensure_ascii=False).replace("<", "\\u003c")
+    return read_file("widget.html").replace(
+        "<body>", f"<body>\n<script>window.__VIZ_STANDALONE__ = {payload};</script>", 1)
+
+
+def copy_png(b64):
+    data = base64.b64decode(b64)
+    if len(data) > MAX_SAVE_BYTES:
+        raise ValueError(f"image is {len(data)} bytes; the limit is {MAX_SAVE_BYTES}")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(data)
+    try:
+        script = f'set the clipboard to (read (POSIX file "{f.name}") as «class PNGf»)'
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            raise OSError(r.stderr.strip() or "osascript failed")
+    finally:
+        os.unlink(f.name)
+
+
 class _PageHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         token = self.path.split("?", 1)[0].rsplit("/", 1)[-1]
@@ -270,10 +328,7 @@ class _PageHandler(http.server.BaseHTTPRequestHandler):
         if page is None:
             self.send_error(404)
             return
-        payload = json.dumps(page, ensure_ascii=False).replace("</", "<\\/")
-        html = read_file("widget.html").replace(
-            "<body>", f"<body>\n<script>window.__VIZ_STANDALONE__ = {payload};</script>", 1)
-        body = html.encode("utf-8")
+        body = standalone_html(page).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -301,8 +356,9 @@ def open_page(args):
 
 
 def call_show_widget(args):
-    if not isinstance(args.get("code"), str) or not args["code"].strip():
-        return {"content": [{"type": "text", "text": "code is empty; nothing rendered."}], "isError": True}
+    code = args.get("widget_code", args.get("code"))  # "code" is the name before 0.8
+    if not isinstance(code, str) or not code.strip():
+        return {"content": [{"type": "text", "text": "widget_code is empty; nothing rendered."}], "isError": True}
     title = args.get("title") or "visual"
     text = f"Rendered '{title}' inline for the user."
     result = {"content": [{"type": "text", "text": text}]}
@@ -317,7 +373,7 @@ def call_show_widget(args):
         result["_meta"] = {"viz/data": data}
     # A copy the model can open in Desktop's browser pane, which also puts a
     # thumbnail card into the chat (the widget itself cannot open the pane).
-    url = open_page({"title": title, "code": args["code"], "data": data})
+    url = open_page({"title": title, "code": code, "data": data})
     result["content"][0]["text"] = f"{text} Side-pane URL: {url}"
     return result
 
@@ -327,7 +383,7 @@ def result_for(method, params):
         return {
             "protocolVersion": params.get("protocolVersion") or DEFAULT_PROTOCOL,
             "capabilities": {"tools": {}, "resources": {}},
-            "serverInfo": {"name": "viz", "version": "0.7.1"},
+            "serverInfo": {"name": "viz", "version": "0.8.0"},
         }
     if method == "ping":
         return {}
@@ -340,11 +396,11 @@ def result_for(method, params):
             return {"tools": []}
         tool = show_widget_tool()
         log("tools/list", widget_uri=tool["_meta"]["ui"]["resourceUri"])
-        return {"tools": [tool, READ_ME, WIDGET_REPORT, WIDGET_SAVE, WIDGET_DATA, WIDGET_OPEN]}
+        return {"tools": [tool, READ_ME, WIDGET_REPORT, WIDGET_SAVE, WIDGET_DATA, WIDGET_OPEN, WIDGET_COPY]}
     if method == "tools/call":
         name, args = params.get("name"), params.get("arguments") or {}
         if name == "show_widget":
-            log("show_widget", title=args.get("title"), code_chars=len(args.get("code") or ""),
+            log("show_widget", title=args.get("title"), code_chars=len(args.get("widget_code") or args.get("code") or ""),
                 data_file=args.get("data_file"))
             return call_show_widget(args)
         if name == "read_me":
@@ -366,6 +422,14 @@ def result_for(method, params):
             url = open_page(args)
             log("widget_open", title=args.get("title"), url=url.rsplit("/", 1)[0] + "/…")
             return {"content": [{"type": "text", "text": url}], "structuredContent": {"url": url}}
+        if name == "widget_copy":
+            try:
+                copy_png(str(args.get("base64") or ""))
+            except (OSError, ValueError, binascii.Error, subprocess.SubprocessError) as e:
+                log("widget_copy", error=str(e))
+                return {"content": [{"type": "text", "text": f"copy failed: {e}"}], "isError": True}
+            log("widget_copy", ok=True)
+            return {"content": [{"type": "text", "text": "copied"}]}
         if name == "widget_data":
             try:
                 data = load_data_file(str(args.get("data_file") or ""))
@@ -390,7 +454,8 @@ def result_for(method, params):
                 "uri": uri,
                 "mimeType": WIDGET_MIME,
                 "text": read_file("widget.html"),
-                "_meta": {"ui": {"csp": {"resourceDomains": RESOURCE_DOMAINS, "connectDomains": []},
+                "_meta": {"ui": {"csp": {"resourceDomains": RESOURCE_DOMAINS, "connectDomains": CDN_DOMAINS},
+                                 "permissions": {"clipboardWrite": {}},
                                  "prefersBorder": False}},
             }]
         }
@@ -403,7 +468,7 @@ def send(msg):
 
 
 def main():
-    log("server-start", version="0.7.1")
+    log("server-start", version="0.8.0")
     for line in sys.stdin:
         line = line.strip()
         if not line:
